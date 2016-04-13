@@ -1,0 +1,64 @@
+__author__ = 'laborc'
+
+import os
+import scrapy
+from scrapy import log
+from scrapy.contrib.spiders import XMLFeedSpider
+from crawler_domain.items import DomainItem
+import json
+
+
+class DmozSpider(XMLFeedSpider):
+    name = "domain"
+    allowed_domains = ["panda.www.net.cn"]
+    custom_settings = {
+        'ITEM_PIPELINES': {'crawler_domain.pipelines.CrawlerDomainPipeline': 300}
+    }
+    start_urls = [
+        "http://panda.www.net.cn/cgi-bin/check.cgi?area_domain=xiguajun.com"
+    ]
+    itertag = 'property'
+
+    def __init__(self, *a, **kw):
+        super(DmozSpider, self).__init__(*a, **kw)
+        self.startNum = 0
+
+    def start_requests(self):
+        lastLine = self.get_last_line("domain.txt")
+        if lastLine:
+            lastLine = lastLine.decode("utf-8").rstrip('\n')
+            domainJson = json.loads(lastLine)
+            self.startNum = int(domainJson["key"].split(".")[0]) + 1
+        yield scrapy.Request(self.getUrl(), callback=self.parse)
+
+    def parse_node(self, response, node):
+        item = DomainItem()
+        item['key'] = node.xpath('key/text()').extract()[0]
+        item['returncode'] = node.xpath('returncode/text()').extract()[0]
+        item['original'] = node.xpath('original/text()').extract()[0]
+        yield item
+
+        if self.startNum <= 100000:
+            self.startNum += 1
+            yield scrapy.Request(self.getUrl(), callback=self.parse)
+
+    def getUrl(self):
+        return 'http://panda.www.net.cn/cgi-bin/check.cgi?area_domain=%s.com' % self.startNum
+
+    def get_last_line(self, inputfile):
+        filesize = os.path.getsize(inputfile)
+        blocksize = 1024
+        dat_file = open(inputfile, 'rb')
+        last_line = ""
+        if filesize > blocksize:
+            maxseekpoint = (filesize // blocksize)
+            dat_file.seek((maxseekpoint - 1) * blocksize)
+        elif filesize:
+            # maxseekpoint = blocksize % filesize
+            dat_file.seek(0, 0)
+        lines = dat_file.readlines()
+        if lines:
+            last_line = lines[-1].strip()
+        # print "last line : ", last_line
+        dat_file.close()
+        return last_line
